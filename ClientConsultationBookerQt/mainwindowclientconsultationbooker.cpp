@@ -3,14 +3,38 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <iostream>
+#include <stdio.h> 
+#include <stdlib.h> 
+#include <unistd.h> 
+#include <string.h> 
+#include <signal.h> 
+#include <pthread.h> 
+#include <ctype.h>
+#include "../protocol/TCP.h" 
+#include "../protocol/CBP.h" 
 using namespace std;
 
-MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(QWidget *parent)
+int serverPort;
+
+
+MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(char *serverIp, int serverPort, QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindowClientConsultationBooker)
 {
+    // stocke les valeurs dans des membres
+    strcpy(this->m_serverIp, serverIp);
+    this->m_serverPort = serverPort;
+
     ui->setupUi(this);
     logoutOk();
+
+    // Connexion sur le serveur  
+    if ((sClient = ClientSocket(m_serverIp, m_serverPort)) == -1) 
+    { 
+        perror("Erreur de ClientSocket"); 
+        exit(1); 
+    } 
+    printf("Connecte sur le serveur.\n"); 
 
     // Configuration de la table des employes (Personnel Garage)
     ui->tableWidgetConsultations->setColumnCount(5);
@@ -30,7 +54,7 @@ MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(QWidget *
         ui->tableWidgetConsultations->setColumnWidth(col, columnWidths[col]);
 
     // Exemples d'utilisation (à supprimer)
-    this->addTupleTableConsultations(1,"Neurologie","Martin Claire","2025-10-01", "09:00");
+    /*this->addTupleTableConsultations(1,"Neurologie","Martin Claire","2025-10-01", "09:00");
     this->addTupleTableConsultations(2,"Cardiologie","Lemoine Bernard","2025-10-06", "10:15");
     this->addTupleTableConsultations(3,"Dermatologie","Maboul Paul","2025-10-23", "14:30");
 
@@ -40,7 +64,7 @@ MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(QWidget *
 
     //this->addComboBoxDoctors("--- TOUS ---");
     this->addComboBoxDoctors("Martin Claire");
-    this->addComboBoxDoctors("Maboul Paul");
+    this->addComboBoxDoctors("Maboul Paul");*/
 }
 
 MainWindowClientConsultationBooker::~MainWindowClientConsultationBooker()
@@ -258,16 +282,75 @@ void MainWindowClientConsultationBooker::on_pushButtonLogin_clicked()
     cout << "patientId = " << patientId << endl;
     cout << "newPatient = " << newPatient << endl;
 
-    loginOk();
+    if((lastName.empty()) || (firstName.empty()))
+        dialogError("Erreur de Login", "Champ nom ou prenom vide");
+    else
+    {
+        char requete[200],reponse[200];
+
+        // ***** Construction de la requete *********************
+        if(newPatient)
+            sprintf(requete,"LOGIN#%s#%s#%d#1#",lastName.c_str(),firstName.c_str(), patientId); 
+        else
+            sprintf(requete,"LOGIN#%s#%s#%d#-1#",lastName.c_str(),firstName.c_str(), patientId); 
+
+        // ***** Envoi requete + réception réponse ************** 
+        Echange(requete,reponse); 
+
+        // ***** Parsing de la réponse ************************** 
+        char *ptr = strtok(reponse,"#"); // entête = LOGIN (normalement...) 
+        ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+        if (strcmp(ptr,"ok") == 0)
+        {
+            printf("Login OK.\n"); 
+            dialogMessage("Success", "Login reussi !");
+            getSpecialites();
+            getDoctor();
+            loginOk();
+        } 
+        else 
+        { 
+            ptr = strtok(NULL,"#"); // raison du ko 
+            printf("Erreur de login: %s\n",ptr); 
+            dialogError("Erreur", ptr);
+        } 
+    }
 }
 
 void MainWindowClientConsultationBooker::on_pushButtonLogout_clicked()
 {
-    logoutOk();
+    char requete[200],reponse[200];
+
+    // ***** Construction de la requete *********************
+    sprintf(requete,"LOGOUT"); 
+
+    // ***** Envoi requete + réception réponse ************** 
+    Echange(requete,reponse); 
+
+    // ***** Parsing de la réponse ************************** 
+    char *ptr = strtok(reponse,"#");
+    ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+    if (strcmp(ptr,"ok") == 0)
+    {
+        dialogMessage("Success", "Logout reussi !");
+        logoutOk();
+    } 
+    else 
+    { 
+        ptr = strtok(NULL,"#"); // raison du ko 
+        printf("Erreur de logout: %s\n",ptr); 
+        dialogError("Erreur", ptr);
+    } 
 }
 
 void MainWindowClientConsultationBooker::on_pushButtonRechercher_clicked()
 {
+    char requete[200],reponse[2048];
+    int id, position;
+    string date, heure;
+
     string specialty = this->getSelectionSpecialty();
     string doctor = this->getSelectionDoctor();
     string startDate = this->getStartDate();
@@ -277,11 +360,206 @@ void MainWindowClientConsultationBooker::on_pushButtonRechercher_clicked()
     cout << "doctor = " << doctor << endl;
     cout << "startDate = " << startDate << endl;
     cout << "endDate = " << endDate << endl;
+
+    if(startDate > endDate)
+        dialogError("Erreur", "La date de debut doit etre inferieur à la date de fin");
+    else
+    {
+        clearTableConsultations();
+        videTableauConsultation();
+        position = doctor.find(" ");
+        string nomdoc = doctor.substr(0, position);
+        string prenomdoc = doctor.substr(position + 1); 
+
+        // ***** Construction de la requete *********************
+        if((specialty == "--- TOUTES ---") && (doctor == "--- TOUS ---"))
+            sprintf(requete,"SEARCH_CONS#0#0#0#%s#%s#", startDate.c_str(), endDate.c_str());
+        else if((specialty != "--- TOUTES ---") && (doctor == "--- TOUS ---"))
+            sprintf(requete,"SEARCH_CONS#%s#0#0#%s#%s#", specialty.c_str(), startDate.c_str(), endDate.c_str());
+        else if((specialty == "--- TOUTES ---") && (doctor != "--- TOUS ---"))
+            sprintf(requete,"SEARCH_CONS#0#%s#%s#%s#%s#", nomdoc.c_str(), prenomdoc.c_str(), startDate.c_str(), endDate.c_str());
+        else
+            sprintf(requete,"SEARCH_CONS#%s#%s#%s#%s#%s#", specialty.c_str(), nomdoc.c_str(), prenomdoc.c_str(), startDate.c_str(), endDate.c_str()); 
+
+        printf("\n*****%s****\n", requete);
+
+        // ***** Envoi requete + réception réponse ************** 
+        Echange(requete,reponse); 
+
+        // ***** Parsing de la réponse ************************** 
+        char *ptr = strtok(reponse,"#");
+        ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+        if (strcmp(ptr,"ok") == 0)
+        {
+
+            printf("\nLecture des consultations reussi\n");
+            nbrConsultation = atoi(strtok(NULL,"|"));     //recuperation du nombre de consultation envoye
+
+            for(int i = 0; i < nbrConsultation; i++)
+            {
+                id = atoi(strtok(NULL,"#"));
+                specialty = string(strtok(NULL,"#"));
+                doctor = string(strtok(NULL,"#"));
+                date = string(strtok(NULL,"#"));
+                heure = string(strtok(NULL,"#"));
+                addTupleTableConsultations(id, specialty, doctor, date, heure);
+                listeConsultation[i] = id;
+            }
+        } 
+        else 
+        { 
+            ptr = strtok(NULL,"#"); // raison du ko 
+            dialogError("Erreur", ptr);
+        }
+    }
+
+    
 }
 
 void MainWindowClientConsultationBooker::on_pushButtonReserver_clicked()
 {
+    char requete[200],reponse[2048];
+    int idConsul;
     int selectedTow = this->getSelectionIndexTableConsultations();
 
-    cout << "selectedRow = " << selectedTow << endl;
+    if(selectedTow == -1)
+        dialogError("Erreur", "Veuillez choisir une reservation");
+    else if(nbrConsultation == 0)
+        dialogMessage("Erreur", "Veuillez effectuer une recherche avant !");
+    else
+    {
+        string raison;
+        cout << "selectedRow = " << selectedTow << endl;
+
+        // ***** Construction de la requete *********************
+        raison = dialogInputText("Revervation", "Veuillez entrer les raison de votre reservation");
+        idConsul = listeConsultation[selectedTow];
+
+        if(raison.empty())
+            dialogError("Erreur", "Aucune raison saisie");
+        else
+        {
+            sprintf(requete,"BOOK_CONS#%d#%d#%s#", idConsul, getPatientId(), raison.c_str()); 
+
+            // ***** Envoi requete + réception réponse ************** 
+            Echange(requete,reponse); 
+
+            // ***** Parsing de la réponse ************************** 
+            char *ptr = strtok(reponse,"#");
+            ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+            if (strcmp(ptr,"ok") == 0)
+            {
+                dialogMessage("Success", "Reservation reussi !");
+                on_pushButtonRechercher_clicked();
+            } 
+            else 
+            { 
+                ptr = strtok(NULL,"#"); // raison du ko 
+                dialogError("Erreur", ptr);
+            }
+        }
+        
+    }
+    
+}
+
+//***** Echange de données entre client et serveur ****************** 
+void MainWindowClientConsultationBooker::Echange(char* requete, char* reponse) 
+{ 
+  int nbEcrits, nbLus; 
+ 
+  // ***** Envoi de la requete **************************** 
+  if ((nbEcrits = Send(sClient,requete,strlen(requete))) == -1) 
+  { 
+    perror("Erreur de Send");
+    exit(1); 
+  } 
+ 
+  // ***** Attente de la reponse ************************** 
+  if ((nbLus = Receive(sClient,reponse)) < 0) 
+  { 
+    perror("Erreur de Receive"); 
+    exit(1); 
+  } 
+ 
+  if (nbLus == 0) 
+  { 
+    printf("Serveur arrete, pas de reponse reçue...\n"); 
+    exit(1); 
+  } 
+  reponse[nbLus] = 0; 
+}
+
+void MainWindowClientConsultationBooker::getSpecialites()
+{
+    char requete[200],reponse[2048];
+    int count;
+
+    // ***** Construction de la requete *********************
+    sprintf(requete,"GET_SPEC");
+
+    // ***** Envoi requete + réception réponse ************** 
+    Echange(requete,reponse); 
+
+    // ***** Parsing de la réponse ************************** 
+    char *ptr = strtok(reponse,"#");
+    ptr = strtok(NULL,"|"); // statut = ok ou ko 
+
+    if (strcmp(ptr,"ok") == 0)
+    {
+
+        printf("\nLecture des specialites reussi\n");
+        count = atoi(strtok(NULL,"|"));     //recuperation du nombre de specialite envoye
+
+        for(int i = 0; i < count; i++)
+        {
+            addComboBoxSpecialties(strtok(NULL, "#"));
+        }
+    } 
+    else 
+    { 
+        ptr = strtok(NULL,"#"); // raison du ko 
+        dialogError("Erreur", ptr);
+    } 
+}
+
+void MainWindowClientConsultationBooker::getDoctor()
+{
+    char requete[200],reponse[2048];
+    int count;
+
+    // ***** Construction de la requete *********************
+    sprintf(requete,"GET_DOC");
+
+    // ***** Envoi requete + réception réponse ************** 
+    Echange(requete,reponse); 
+
+    // ***** Parsing de la réponse ************************** 
+    char *ptr = strtok(reponse,"#");
+    ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+    if (strcmp(ptr,"ok") == 0)
+    {
+
+        printf("\nLecture des docteurs reussi\n");
+        count = atoi(strtok(NULL,"|"));     //recuperation du nombre de docteur envoye
+
+        for(int i = 0; i < count; i++)
+        {
+            addComboBoxDoctors(strtok(NULL, "#"));
+        }
+    } 
+    else 
+    { 
+        ptr = strtok(NULL,"#"); // raison du ko 
+        dialogError("Erreur", ptr);
+    }
+}
+
+void MainWindowClientConsultationBooker::videTableauConsultation()
+{
+    for(int i = 0; i < 20; i++)
+        listeConsultation[i] = -1;
 }

@@ -14,7 +14,7 @@ class MainWindowClientConsultationBooker : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindowClientConsultationBooker(QWidget *parent = nullptr);
+    MainWindowClientConsultationBooker(char *serverIp, int serverPort,QWidget *parent = nullptr);
     ~MainWindowClientConsultationBooker();
 
     void addTupleTableConsultations(int id, string specialty, string doctor, string date, string hour);
@@ -50,6 +50,10 @@ public:
     string dialogInputText(const string& title,const string& question);
     int dialogInputInt(const string& title,const string& question);
 
+    void Echange(char* requete, char* reponse);
+    void getSpecialites();
+    void getDoctor();
+    void videTableauConsultation();
 
 private slots:
     void on_pushButtonLogin_clicked();
@@ -59,5 +63,10 @@ private slots:
 
 private:
     Ui::MainWindowClientConsultationBooker *ui;
+    char m_serverIp[50];
+    int m_serverPort;
+    int sClient; 
+    int nbrConsultation = 0;
+    int listeConsultation[20];
 };
 #endif // MAINWINDOWCLIENTCONSULTATIONBOOKER_H
