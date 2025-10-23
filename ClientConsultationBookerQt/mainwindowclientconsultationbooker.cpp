@@ -17,24 +17,12 @@ using namespace std;
 int serverPort;
 
 
-MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(char *serverIp, int serverPort, QWidget *parent)
+MainWindowClientConsultationBooker::MainWindowClientConsultationBooker(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindowClientConsultationBooker)
 {
-    // stocke les valeurs dans des membres
-    strcpy(this->m_serverIp, serverIp);
-    this->m_serverPort = serverPort;
-
     ui->setupUi(this);
     logoutOk();
-
-    // Connexion sur le serveur  
-    if ((sClient = ClientSocket(m_serverIp, m_serverPort)) == -1) 
-    { 
-        perror("Erreur de ClientSocket"); 
-        exit(1); 
-    } 
-    printf("Connecte sur le serveur.\n"); 
 
     // Configuration de la table des employes (Personnel Garage)
     ui->tableWidgetConsultations->setColumnCount(5);
@@ -285,36 +273,41 @@ void MainWindowClientConsultationBooker::on_pushButtonLogin_clicked()
     if((lastName.empty()) || (firstName.empty()))
         dialogError("Erreur de Login", "Champ nom ou prenom vide");
     else
-    {
-        char requete[200],reponse[200];
-
-        // ***** Construction de la requete *********************
-        if(newPatient)
-            sprintf(requete,"LOGIN#%s#%s#%d#1#",lastName.c_str(),firstName.c_str(), patientId); 
-        else
-            sprintf(requete,"LOGIN#%s#%s#%d#-1#",lastName.c_str(),firstName.c_str(), patientId); 
-
-        // ***** Envoi requete + réception réponse ************** 
-        Echange(requete,reponse); 
-
-        // ***** Parsing de la réponse ************************** 
-        char *ptr = strtok(reponse,"#"); // entête = LOGIN (normalement...) 
-        ptr = strtok(NULL,"#"); // statut = ok ou ko 
-
-        if (strcmp(ptr,"ok") == 0)
+    {   
+        if(connexionServeur() == 1)
         {
-            printf("Login OK.\n"); 
-            dialogMessage("Success", "Login reussi !");
-            getSpecialites();
-            getDoctor();
-            loginOk();
-        } 
-        else 
-        { 
-            ptr = strtok(NULL,"#"); // raison du ko 
-            printf("Erreur de login: %s\n",ptr); 
-            dialogError("Erreur", ptr);
-        } 
+            char requete[200],reponse[200];
+
+            // ***** Construction de la requete *********************
+            if(newPatient)
+                sprintf(requete,"LOGIN#%s#%s#%d#1#",lastName.c_str(),firstName.c_str(), patientId); 
+            else
+                sprintf(requete,"LOGIN#%s#%s#%d#-1#",lastName.c_str(),firstName.c_str(), patientId); 
+
+            // ***** Envoi requete + réception réponse ************** 
+            Echange(requete,reponse); 
+
+            // ***** Parsing de la réponse ************************** 
+            char *ptr = strtok(reponse,"#"); // entête = LOGIN (normalement...) 
+            ptr = strtok(NULL,"#"); // statut = ok ou ko 
+
+            if (strcmp(ptr,"ok") == 0)
+            {
+                printf("Login OK.\n"); 
+                dialogMessage("Success", "Login reussi !");
+                getSpecialites();
+                getDoctor();
+                loginOk();
+            } 
+            else 
+            { 
+                ptr = strtok(NULL,"#"); // raison du ko 
+                printf("Erreur de login: %s\n",ptr); 
+                dialogError("Erreur", ptr);
+            } 
+        }
+        else
+            dialogError("Erreur", "Erreur de connexion au serveur");
     }
 }
 
@@ -562,4 +555,20 @@ void MainWindowClientConsultationBooker::videTableauConsultation()
 {
     for(int i = 0; i < 20; i++)
         listeConsultation[i] = -1;
+}
+
+int MainWindowClientConsultationBooker::connexionServeur()
+{
+    // stocke les valeurs dans des membres
+    strcpy(this->m_serverIp, "0.0.0.0");
+    this->m_serverPort = 50000;
+
+    // Connexion sur le serveur  
+    if ((sClient = ClientSocket(this->m_serverIp, this->m_serverPort)) == -1) 
+    { 
+        perror("Erreur de ClientSocket"); 
+        return -1; 
+    } 
+    printf("Connecte sur le serveur.\n"); 
+    return 1;
 }

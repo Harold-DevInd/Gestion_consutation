@@ -11,11 +11,12 @@
 void HandlerSIGINT(int s); 
 void TraitementConnexion(int sService); 
 void* FctThreadClient(void* p); 
-int sEcoute; 
+int sEcoute, sEcouteAdmin; 
 int NB_THREADS_POOL;
 int PORT_ECOUTE;
+int PORT_ECOUTE_ADMIN;
 
-int load_config(const char *filename, int *portE, int *nbrP);
+int load_config(const char *filename, int *portE, int *portEA, int *nbrP);
 
 // Gestion du pool de threads 
 #define TAILLE_FILE_ATTENTE 20 
@@ -43,8 +44,8 @@ int main(int argc,char* argv[])
         exit(1); 
     }
 
-    //Lecture des parametre du serveur
-    if(load_config("./serveur/server.conf", &PORT_ECOUTE, &NB_THREADS_POOL) == -1)
+    //Lecture des parametres du serveur
+    if(load_config("./serveur/server.conf", &PORT_ECOUTE, &PORT_ECOUTE_ADMIN ,&NB_THREADS_POOL) == -1)
     {
         perror("Erreur de chargement du fichier de configuration"); 
         exit(1);
@@ -53,7 +54,14 @@ int main(int argc,char* argv[])
     // Creation de la socket d'écoute 
     if ((sEcoute = ServerSocket(PORT_ECOUTE)) == -1) 
     { 
-        perror("Erreur de ServeurSocket"); 
+        perror("Erreur de ServeurSocket client"); 
+        exit(1); 
+    } 
+
+    // Creation de la socket d'écoute pour l admin
+    if ((sEcouteAdmin = ServerSocket(PORT_ECOUTE_ADMIN)) == -1) 
+    { 
+        perror("Erreur de ServeurSocket admin client"); 
         exit(1); 
     } 
 
@@ -64,12 +72,12 @@ int main(int argc,char* argv[])
     pthread_create(&th,NULL,FctThreadClient,NULL); 
 
     // Mise en boucle du serveur 
-    int sService; 
-    char ipClient[50]; 
+    int sService, sServiceAdmin; 
+    char ipClient[50], ipAdmin[50]; 
     printf("Demarrage du serveur.\n"); 
     while(1) 
     { 
-        printf("Attente d'une connexion...\n"); 
+        printf("Attente d'une connexion à un client...\n"); 
         if ((sService = Accept(sEcoute,ipClient)) == -1) 
         { 
             perror("Erreur de Accept"); 
@@ -77,7 +85,17 @@ int main(int argc,char* argv[])
             CBP_Close(); 
             exit(1); 
         } 
-        printf("Connexion acceptée : IP=%s socket=%d\n",ipClient,sService); 
+        printf("Connexion à un client acceptée : IP=%s socket=%d\n",ipClient,sService);
+        
+        printf("Attente d'une connexion à un admin...\n"); 
+        if ((sServiceAdmin = Accept(sEcouteAdmin, ipAdmin)) == -1) 
+        { 
+            perror("Erreur de Accept admin"); 
+            close(sEcouteAdmin); 
+            CBP_Close(); 
+            exit(1); 
+        } 
+        printf("Connexion a un admin acceptée : IP=%s socket=%d\n",ipAdmin, sServiceAdmin); 
 
         // Insertion en liste d'attente et réveil d'un thread du pool 
         // (Production d'une tâche) 
@@ -192,7 +210,7 @@ static void trim(char *str) {
 }
 
 /* Fonction de chargement de configuration */
-int load_config(const char *filename, int *portE, int *nbrP)
+int load_config(const char *filename, int *portE, int *portEA, int *nbrP)
 {
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -217,6 +235,8 @@ int load_config(const char *filename, int *portE, int *nbrP)
 
         if (strcmp(key, "PORT_RESERVATION") == 0) {
             *portE = atoi(value);
+        } else if (strcmp(key, "PORT_ADMIN") == 0){
+            *portEA = atoi(value);
         } else if (strcmp(key, "NB_THREADS") == 0) {
             *nbrP = atoi(value);
         } else {

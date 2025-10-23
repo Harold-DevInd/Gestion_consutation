@@ -18,7 +18,7 @@ Client: ClientConsultationBookerQt/main.cpp \
 	    ClientConsultationBookerQt/moc_mainwindowclientconsultationbooker.cpp \
 	    protocol/CBP.cpp protocol/TCP.cpp \
 	    -I/usr/include/mysql -L/usr/lib64/mysql $(QT_CFLAGS) $(QT_LIBS) \
-	    -lmysqlclient -lpthread -o Client
+	    -lmysqlclient -lpthread -o Client.out
 
 # =========================
 # Serveur
@@ -26,7 +26,7 @@ Client: ClientConsultationBookerQt/main.cpp \
 Serveur: serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp protocol/TCP.h
 	g++ -Wall -std=c++17 \
 	    serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp \
-	    -I/usr/include/mysql  -L/usr/lib64/mysql -lmysqlclient -lpthread -o Serveur
+	    -I/usr/include/mysql  -L/usr/lib64/mysql -lmysqlclient -lpthread -o Serveur.out
 
 # =========================
 # Creation de la base de données
@@ -35,7 +35,7 @@ CreationBD: BD_Hospital/CreationBD.cpp
 	g++ -Wall -std=c++17 \
 	    BD_Hospital/CreationBD.cpp \
 	    -I/usr/include/mysql -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lrt -lssl -lcrypto -ldl \
-	    -o CreationBD
+	    -o CreationBD.out
 
 # =========================
 # Nettoyage
