@@ -6,15 +6,21 @@
 #include <pthread.h> 
 #include <ctype.h>
 #include "../protocol/TCP.h" 
-#include "../protocol/CBP.h" 
+#include "../protocol/CBP.h"
+#include "../protocol/ACBP.h" 
 
 void HandlerSIGINT(int s); 
 void TraitementConnexion(int sService); 
 void* FctThreadClient(void* p); 
+void* FctThreadServeurClientadmin(void* p);
+void* FctThreadServeurClient(void* p);
+void TraitementConnexionAdmin(int sServiceAdmin);
 int sEcoute, sEcouteAdmin; 
 int NB_THREADS_POOL;
 int PORT_ECOUTE;
 int PORT_ECOUTE_ADMIN;
+int sService, sServiceAdmin;
+char ipClient[50], ipAdmin[50];
 
 int load_config(const char *filename, int *portE, int *portEA, int *nbrP);
 
@@ -69,45 +75,18 @@ int main(int argc,char* argv[])
     printf("Création du pool de threads.\n"); 
     pthread_t th; 
     for (int i=0 ; i<NB_THREADS_POOL ; i++) 
-    pthread_create(&th,NULL,FctThreadClient,NULL); 
+        pthread_create(&th,NULL,FctThreadClient,NULL); 
 
-    // Mise en boucle du serveur 
-    int sService, sServiceAdmin; 
-    char ipClient[50], ipAdmin[50]; 
-    printf("Demarrage du serveur.\n"); 
-    while(1) 
-    { 
-        printf("Attente d'une connexion à un client...\n"); 
-        if ((sService = Accept(sEcoute,ipClient)) == -1) 
-        { 
-            perror("Erreur de Accept"); 
-            close(sEcoute); 
-            CBP_Close(); 
-            exit(1); 
-        } 
-        printf("Connexion à un client acceptée : IP=%s socket=%d\n",ipClient,sService);
-        
-        printf("Attente d'une connexion à un admin...\n"); 
-        if ((sServiceAdmin = Accept(sEcouteAdmin, ipAdmin)) == -1) 
-        { 
-            perror("Erreur de Accept admin"); 
-            close(sEcouteAdmin); 
-            CBP_Close(); 
-            exit(1); 
-        } 
-        printf("Connexion a un admin acceptée : IP=%s socket=%d\n",ipAdmin, sServiceAdmin); 
+    // Mise en boucle des serveur 
+    printf("Demarrage des serveurs.\n");
+    pthread_t thClient, thClientadmin;
 
-        // Insertion en liste d'attente et réveil d'un thread du pool 
-        // (Production d'une tâche) 
-        pthread_mutex_lock(&mutexSocketsAcceptees); 
-        socketsAcceptees[indiceEcriture] = sService; // !!! 
-        indiceEcriture++; 
+    pthread_create(&thClient, NULL, FctThreadServeurClient, NULL);
+    pthread_create(&thClientadmin, NULL, FctThreadServeurClientadmin, NULL);
 
-        if (indiceEcriture == TAILLE_FILE_ATTENTE) indiceEcriture = 0; 
-
-        pthread_mutex_unlock(&mutexSocketsAcceptees); 
-        pthread_cond_signal(&condSocketsAcceptees); 
-    } 
+    pthread_join(thClient, NULL);
+    pthread_join(thClientadmin, NULL);
+     
 } 
 
 void* FctThreadClient(void* p) 
@@ -132,8 +111,7 @@ void* FctThreadClient(void* p)
         pthread_mutex_unlock(&mutexSocketsAcceptees); 
 
         // Traitement de la connexion (consommation de la tâche) 
-        printf("\t[THREAD %ld] Je m'occupe de la socket %d\n", 
-        pthread_self(),sService); 
+        printf("\t[THREAD %ld] Je m'occupe de la socket %d\n", pthread_self(),sService); 
         TraitementConnexion(sService); 
     } 
 } 
@@ -141,7 +119,8 @@ void* FctThreadClient(void* p)
 void HandlerSIGINT(int s) 
 { 
     printf("\nArret du serveur.\n"); 
-    close(sEcoute); 
+    close(sEcoute);
+    close(sEcouteAdmin); 
 
     pthread_mutex_lock(&mutexSocketsAcceptees); 
 
@@ -149,11 +128,39 @@ void HandlerSIGINT(int s)
         if (socketsAcceptees[i] != -1) close(socketsAcceptees[i]); 
 
     pthread_mutex_unlock(&mutexSocketsAcceptees); 
-    CBP_Close(); 
+    CBP_Close();
+    ACBP_Close(); 
     exit(0); 
 }
 
-void TraitementConnexion(int sService) 
+void* FctThreadServeurClient(void* p)
+{
+    while(1) 
+    { 
+        printf("Attente d'une connexion à un client...\n"); 
+        if ((sService = Accept(sEcoute,ipClient)) == -1) 
+        { 
+            perror("Erreur de Accept"); 
+            close(sEcoute); 
+            CBP_Close(); 
+            exit(1); 
+        } 
+        printf("Connexion à un client acceptée : IP=%s socket=%d\n",ipClient,sService);
+
+        // Insertion en liste d'attente et réveil d'un thread du pool 
+        // (Production d'une tâche) 
+        pthread_mutex_lock(&mutexSocketsAcceptees); 
+        socketsAcceptees[indiceEcriture] = sService; // !!! 
+        indiceEcriture++; 
+
+        if (indiceEcriture == TAILLE_FILE_ATTENTE) indiceEcriture = 0; 
+
+        pthread_mutex_unlock(&mutexSocketsAcceptees); 
+        pthread_cond_signal(&condSocketsAcceptees); 
+    }
+}
+
+void TraitementConnexion(int ssc) 
 { 
     char requete[200], reponse[200]; 
     int nbLus, nbEcrits; 
@@ -164,10 +171,10 @@ void TraitementConnexion(int sService)
         printf("\t[THREAD %ld] Attente requete...\n",pthread_self()); 
 
         // ***** Reception Requete ****************** 
-        if ((nbLus = Receive(sService,requete)) < 0) 
+        if ((nbLus = Receive(ssc,requete)) < 0) 
         { 
             perror("Erreur de Receive"); 
-            close(sService); 
+            close(ssc); 
             HandlerSIGINT(0); 
         } 
 
@@ -175,29 +182,101 @@ void TraitementConnexion(int sService)
         if (nbLus == 0) 
         { 
             printf("\t[THREAD %ld] Fin de connexion du client.\n",pthread_self()); 
-            close(sService); 
+            close(ssc); 
             return; 
         } 
         requete[nbLus] = 0; 
         printf("\t[THREAD %ld] Requete recue = %s\n",pthread_self(),requete); 
 
         // ***** Traitement de la requete *********** 
-        onContinue = CBP(requete,reponse,sService); 
+        onContinue = CBP(requete,reponse,ssc); 
 
         // ***** Envoi de la reponse **************** 
-        if ((nbEcrits = Send(sService,reponse,strlen(reponse))) < 0) 
+        if ((nbEcrits = Send(ssc,reponse,strlen(reponse))) < 0) 
         { 
             perror("Erreur de Send"); 
-            close(sService); 
+            close(ssc); 
             HandlerSIGINT(0); 
         } 
 
         printf("\t[THREAD %ld] Reponse envoyee = %s\n",pthread_self(),reponse); 
         
         if (!onContinue)  
-            printf("\t[THREAD %ld] Fin de connexion de la socket %d\n",pthread_self(),sService); 
+            printf("\t[THREAD %ld] Fin de connexion de la socket %d\n",pthread_self(),ssc); 
     }
 }
+
+void* FctThreadServeurClientadmin(void* p)
+{
+    while(1)
+    {
+        printf("Attente d'une connexion à un admin...\n"); 
+        if ((sServiceAdmin = Accept(sEcouteAdmin, ipAdmin)) == -1) 
+        { 
+            perror("Erreur de Accept admin"); 
+            close(sEcouteAdmin); 
+            exit(1);
+        } 
+        printf("Connexion a un admin acceptée : IP=%s socket=%d\n",ipAdmin, sServiceAdmin);
+
+        // Traitement de la connexion (consommation de la tâche) 
+        printf("\t[THREAD %ld] Je m'occupe de la socket Client admin %d\n", pthread_self(),sServiceAdmin); 
+        TraitementConnexionAdmin(sServiceAdmin);
+        close(sServiceAdmin);
+        printf("Admin déconnecté — attente d'une nouvelle connexion à un admin...\n");
+    }
+    
+}
+
+void TraitementConnexionAdmin(int ssa)
+{
+    char requete[200], reponse[200]; 
+    int nbLus, nbEcrits; 
+    bool onContinue = true;
+
+    while(onContinue)
+    {
+        printf("\t[THREAD Admin %ld] Attente requete...\n",pthread_self()); 
+
+        // ***** Reception Requete ****************** 
+        if ((nbLus = Receive(ssa,requete)) < 0) 
+        { 
+            perror("Erreur de Receive"); 
+            close(ssa); 
+            HandlerSIGINT(0); 
+        } 
+
+        // ***** Fin de connexion ? ***************** 
+        if (nbLus == 0) 
+        { 
+            printf("\t[THREAD Admin %ld] Fin de connexion du client.\n",pthread_self()); 
+            close(ssa); 
+            return; 
+        } 
+        requete[nbLus] = 0; 
+        printf("\t[THREAD Admin %ld] Requete recue = %s\n",pthread_self(),requete); 
+
+        // ***** Traitement de la requete *********** 
+        onContinue = ACBP(requete,reponse,ssa); 
+
+        // ***** Envoi de la reponse **************** 
+        if ((nbEcrits = Send(ssa,reponse,strlen(reponse))) < 0) 
+        { 
+            perror("Erreur de Send"); 
+            close(ssa); 
+            HandlerSIGINT(0); 
+        } 
+
+        printf("\t[THREAD Admin %ld] Reponse envoyee = %s\n",pthread_self(),reponse); 
+        
+        if (!onContinue)  
+            printf("\t[THREAD Admin %ld] Fin de connexion de la socket %d\n",pthread_self(),ssa); 
+    }
+
+    printf("\nfin de vie du serveur Client Admin");
+    close(ssa);
+    exit(1);
+} 
 
 /* Helper pour supprimer espaces et retours de ligne */
 static void trim(char *str) {

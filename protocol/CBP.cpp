@@ -7,14 +7,19 @@
 #include <mysql.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <sys/types.h>      // Pour types comme socklen_t
+#include <sys/socket.h>     // Pour socket(), bind(), accept(), etc.
+#include <netinet/in.h>     // Pour sockaddr_in, htons(), etc.
+#include <arpa/inet.h>  
 using namespace std;
 
 //***** Etat du protocole : liste des clients loggés **************** 
-int clients[NB_MAX_CLIENTS]; 
+int clients[NB_MAX_CLIENTS];
+CLIENT liste_clients[NB_MAX_CLIENTS]; 
 int nbClients = 0; 
 int  estPresent(int socket); 
-void ajoute(int socket); 
-void retire(int socket); 
+void ajoute(int socket, CLIENT client); 
+void retire(int socket);
 pthread_mutex_t mutexClients = PTHREAD_MUTEX_INITIALIZER; 
 
 //***** Parsing de la requete et creation de la reponse ************* 
@@ -28,6 +33,10 @@ bool CBP(char* requete, char* reponse,int socket)
     { 
         char lastName[50], firstName[50];
         int numero, existe;
+        CLIENT client;
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        getpeername(socket, (struct sockaddr*)&client_addr, &addr_len);
 
         strcpy(lastName,strtok(NULL,"#")); 
         strcpy(firstName,strtok(NULL,"#")); 
@@ -41,11 +50,18 @@ bool CBP(char* requete, char* reponse,int socket)
         } 
         else 
         { 
-            if (CBP_Login(lastName,firstName, numero, existe)) 
-            { 
-                sprintf(reponse,"LOGIN#ok"); 
-                ajoute(socket); 
+            if (CBP_Login(lastName,firstName, numero, &existe)) 
+            {   
 
+                sprintf(reponse,"LOGIN#ok#%d", existe); 
+
+                //Recuperation des infos sur le client
+                strcpy(client.ip_client, inet_ntoa(client_addr.sin_addr));
+                strcpy(client.ip_client, firstName);
+                strcpy(client.ip_client, lastName);
+                client.numero_patient = existe;
+
+                ajoute(socket, client);
             }       
             else 
             { 
@@ -146,7 +162,7 @@ bool CBP(char* requete, char* reponse,int socket)
     // ***** BOOK_CONSULTATION ******************************************* 
     if (strcmp(ptr,"BOOK_CONS") == 0) 
     { 
-          printf("\t\n[THREAD %ld] OPERATION %s\n",pthread_self(), ptr); 
+        printf("\t\n[THREAD %ld] OPERATION %s\n",pthread_self(), ptr); 
 
         if (estPresent(socket) == -1) sprintf(reponse,"BOOK_CONS#ko#Client non loggé !");  
         else 
@@ -170,12 +186,35 @@ bool CBP(char* requete, char* reponse,int socket)
             }
         }
     }
+    if(strcmp(ptr,"INFO_CLIENTS") == 0)
+    {
+        printf("\t\n[THREAD %ld] OPERATION %s\n",pthread_self(), ptr); 
+
+        int idC, idP;
+        char raison[100];
+
+        idC = atoi(strtok(NULL,"#"));
+        idP = atoi(strtok(NULL,"#"));
+        strcpy(raison, strtok(NULL,"#"));
+
+        if(CBP_Book_Consultation(idC, idP, raison)) 
+        {
+            sprintf(reponse,"BOOK_CONS#ok");
+            return true;
+        }
+        else
+        {
+            sprintf(reponse,"BOOK_CONS#ko#Erreur lors de la reservation de la consultation");
+            return false;
+        }
+        
+    }
 
     return true; 
 } 
 
 //***** Traitement des requetes ************************************* 
-bool CBP_Login(const char* last_name,const char* first_name, int numero, int existe)
+bool CBP_Login(const char* last_name,const char* first_name, int numero, int* existe)
 {
     MYSQL* connexion;
     MYSQL_RES  *resultat;
@@ -192,10 +231,10 @@ bool CBP_Login(const char* last_name,const char* first_name, int numero, int exi
     fprintf(stderr,"\n(CBP) apres connexion a la BD\n");
 
     // Construction de la requête SELECT
-    if(existe == -1)
-        sprintf(requete, "SELECT * FROM patients WHERE id = %d;", numero);
-    else
+    if(*existe == -1)
         sprintf(requete, "INSERT INTO patients VALUES (NULL, '%s', '%s', NULL);", last_name, first_name);
+    else
+        sprintf(requete, "SELECT * FROM patients WHERE id = %d;", numero);
 
     // Exécution de la requête
     if (mysql_query(connexion, requete)) {
@@ -204,7 +243,16 @@ bool CBP_Login(const char* last_name,const char* first_name, int numero, int exi
         return false;
     }
 
-    if(existe == -1)
+    if(*existe == -1)
+    {
+        int nb = mysql_affected_rows(connexion);
+        *existe = mysql_insert_id(connexion);
+        if (nb == 1)
+            return true;
+        else
+            return false;
+    }
+    else
     {
         // Récupération des résultats
         resultat = mysql_store_result(connexion);
@@ -221,18 +269,11 @@ bool CBP_Login(const char* last_name,const char* first_name, int numero, int exi
             id = atoi(Tuple[0]); //id
             strncpy(nom, Tuple[1], sizeof(nom)); //last name
             strncpy(prenom, Tuple[2], sizeof(prenom)); // first name
+            *existe = id;
 
             if (strcmp(last_name, nom)==0 && strcmp(first_name, prenom)==0 && (id == numero)) 
                 return true;
         }
-        else
-            return false;
-    }
-    else
-    {
-        int nb = mysql_affected_rows(connexion);
-        if (nb == 1)
-            return true;
         else
             return false;
     }
@@ -520,11 +561,12 @@ int estPresent(int socket)
     return indice; 
 } 
 
-void ajoute(int socket) 
+void ajoute(int socket, CLIENT client) 
 { 
     pthread_mutex_lock(&mutexClients); 
 
-    clients[nbClients] = socket; 
+    clients[nbClients] = socket;
+    liste_clients[nbClients] = client; 
     nbClients++; 
 
     pthread_mutex_unlock(&mutexClients); 
@@ -537,12 +579,15 @@ void retire(int socket)
     if (pos == -1) return; 
         pthread_mutex_lock(&mutexClients); 
 
-    for (int i=pos ; i<=nbClients-2 ; i++) 
-        clients[i] = clients[i+1]; 
+    for (int i=pos ; i<=nbClients-2 ; i++)
+    {
+        clients[i] = clients[i+1];
+        liste_clients[i] = liste_clients[i+1];
+    }
 
     nbClients--; 
     pthread_mutex_unlock(&mutexClients); 
-} 
+}
 
 bool RechercheBD(char* requete, MYSQL_RES **resultat)
 {

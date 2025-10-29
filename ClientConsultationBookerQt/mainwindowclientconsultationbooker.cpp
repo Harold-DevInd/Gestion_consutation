@@ -280,9 +280,9 @@ void MainWindowClientConsultationBooker::on_pushButtonLogin_clicked()
 
             // ***** Construction de la requete *********************
             if(newPatient)
-                sprintf(requete,"LOGIN#%s#%s#%d#1#",lastName.c_str(),firstName.c_str(), patientId); 
-            else
                 sprintf(requete,"LOGIN#%s#%s#%d#-1#",lastName.c_str(),firstName.c_str(), patientId); 
+            else
+                sprintf(requete,"LOGIN#%s#%s#%d#1#",lastName.c_str(),firstName.c_str(), patientId); 
 
             // ***** Envoi requete + réception réponse ************** 
             Echange(requete,reponse); 
@@ -293,6 +293,13 @@ void MainWindowClientConsultationBooker::on_pushButtonLogin_clicked()
 
             if (strcmp(ptr,"ok") == 0)
             {
+
+                if(!newPatient)
+                {
+                    char *id = strtok(NULL,"#");
+                    this->setPatientId(atoi(id));
+                }                    
+
                 printf("Login OK.\n"); 
                 dialogMessage("Success", "Login reussi !");
                 getSpecialites();

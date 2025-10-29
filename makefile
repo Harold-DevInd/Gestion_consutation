@@ -23,9 +23,9 @@ Client: ClientConsultationBookerQt/main.cpp \
 # =========================
 # Serveur
 # =========================
-Serveur: serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp protocol/TCP.h
+Serveur: serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp protocol/TCP.h protocol/ACBP.cpp
 	g++ -Wall -std=c++17 \
-	    serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp \
+	    serveur/serveur.cpp protocol/CBP.cpp protocol/TCP.cpp protocol/ACBP.cpp\
 	    -I/usr/include/mysql  -L/usr/lib64/mysql -lmysqlclient -lpthread -o Serveur.out
 
 # =========================
