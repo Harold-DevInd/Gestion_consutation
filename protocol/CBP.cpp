@@ -56,10 +56,10 @@ bool CBP(char* requete, char* reponse,int socket)
                 sprintf(reponse,"LOGIN#ok#%d", existe); 
 
                 //Recuperation des infos sur le client
-                strcpy(client.ip_client, inet_ntoa(client_addr.sin_addr));
+                client.numero_patient = existe;
                 strcpy(client.ip_client, firstName);
                 strcpy(client.ip_client, lastName);
-                client.numero_patient = existe;
+                strcpy(client.ip_client, inet_ntoa(client_addr.sin_addr));
 
                 ajoute(socket, client);
             }       
@@ -186,28 +186,23 @@ bool CBP(char* requete, char* reponse,int socket)
             }
         }
     }
-    if(strcmp(ptr,"INFO_CLIENTS") == 0)
+    
+    if(strcmp(ptr,"LIST_CLIENT") == 0)
     {
+        char resultat[1024];
+
         printf("\t\n[THREAD %ld] OPERATION %s\n",pthread_self(), ptr); 
 
-        int idC, idP;
-        char raison[100];
-
-        idC = atoi(strtok(NULL,"#"));
-        idP = atoi(strtok(NULL,"#"));
-        strcpy(raison, strtok(NULL,"#"));
-
-        if(CBP_Book_Consultation(idC, idP, raison)) 
+        if(CBP_Liste_Clients(resultat)) 
         {
-            sprintf(reponse,"BOOK_CONS#ok");
+            sprintf(reponse,"LIST_CLIENT#ok%s", resultat);
             return true;
         }
         else
         {
-            sprintf(reponse,"BOOK_CONS#ko#Erreur lors de la reservation de la consultation");
+            sprintf(reponse,"LIST_CLIENT#ko#Erreur liste des clients vide");
             return false;
         }
-        
     }
 
     return true; 
@@ -539,6 +534,33 @@ bool CBP_Book_Consultation(int id_Consultation, int id_Patient, char* raison)
     return true;
 }
 
+bool CBP_ListeClient(char* lc)
+{
+    string list;
+
+    if(nbClients == 0)
+        return false;
+    else
+    {
+        pthread_mutex_lock(&mutexClients);
+        for(int i =0; i < nbClients; i++)
+        {
+            list += liste_clients[i].numero_patient;
+            list += "#";
+            list += liste_clients[i].first_name;
+            list += "#";
+            list += liste_clients[i].last_name;
+            list += "#";
+            list += liste_clients[i].ip_client;
+            list += "#";
+        }
+        pthread_mutex_unlock(&mutexClients);
+
+        strcpy(lc, list.c_str());
+        return true;
+    }
+
+}
 
 //***** Gestion de l'état du protocole ****************************** 
 int estPresent(int socket) 
