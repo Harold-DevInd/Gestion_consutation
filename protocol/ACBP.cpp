@@ -17,15 +17,23 @@ int socket_admin;
 bool ACBP(char* requete, char* reponse,int socketAdmin)
 { 
     socket_admin = socketAdmin;
+    char resultat[1024];
+    bool res;
+
     // ***** Récupération nom de la requete ***************** 
     char *ptr = strtok(requete,"#"); 
 
     // ***** GET_SPECIALITES ******************************************* 
     if (strcmp(ptr,"LIST_CLIENT") == 0) 
     { 
-        printf("\t\n[THREAD ADMIN %ld] OPERATION %s\n",pthread_self(), ptr); 
+        printf("\t\n[THREAD ADMIN %ld] OPERATION %s\n",pthread_self(), ptr);
 
-         
+        //Envoie de la requette a CBP
+        res = CBP(ptr, resultat, socket_admin);
+        sprintf(reponse, "%s", resultat);
+
+        if(!res)
+            return false;         
     }
 
     return true; 

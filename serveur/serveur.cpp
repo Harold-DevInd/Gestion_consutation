@@ -230,7 +230,7 @@ void* FctThreadServeurClientadmin(void* p)
 
 void TraitementConnexionAdmin(int ssa)
 {
-    char requete[200], reponse[200]; 
+    char requete[100], reponse[1024]; 
     int nbLus, nbEcrits; 
     bool onContinue = true;
 
@@ -249,7 +249,7 @@ void TraitementConnexionAdmin(int ssa)
         // ***** Fin de connexion ? ***************** 
         if (nbLus == 0) 
         { 
-            printf("\t[THREAD Admin %ld] Fin de connexion du client.\n",pthread_self()); 
+            printf("\t[THREAD Admin %ld] Fin de connexion de l' admin.\n",pthread_self()); 
             close(ssa); 
             return; 
         } 
@@ -267,7 +267,8 @@ void TraitementConnexionAdmin(int ssa)
             HandlerSIGINT(0); 
         } 
 
-        printf("\t[THREAD Admin %ld] Reponse envoyee = %s\n",pthread_self(),reponse); 
+        printf("\t[THREAD Admin %ld] Reponse envoyee = %s\n",pthread_self(),reponse);
+        ACBP_Close(); 
         
         if (!onContinue)  
             printf("\t[THREAD Admin %ld] Fin de connexion de la socket %d\n",pthread_self(),ssa); 
